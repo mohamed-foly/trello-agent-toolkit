@@ -4,16 +4,33 @@ An LLM-to-Trello interface — a CLI, SDK, and MCP server that let AI agents (an
 
 > **Unofficial project.** This is an independent, community-built tool that uses Trello's public API. It is not affiliated with, endorsed by, or sponsored by Trello or Atlassian. "Trello" is a trademark of Atlassian Pty Ltd.
 
+![Example output of trello tasks list --brief, showing a JSON array of two sample cards with id, name, list, and labels fields](./docs/screenshot-tasks-list.png)
+
+*Example output shown above uses sample data, not a real board.*
+
 ## Table of Contents
 
+- [Features](#features)
 - [Quick Start](#quick-start)
 - [Getting Trello API Credentials](#getting-trello-api-credentials)
 - [Configuration](#configuration)
 - [CLI Usage](#cli-usage)
 - [MCP Server (wiring into Claude Code, Cursor, etc.)](#mcp-server-wiring-into-claude-code-cursor-etc)
 - [Generated & Sensitive Files](#generated--sensitive-files)
+- [SDK Usage](#sdk-usage)
 - [For Contributors](#for-contributors)
 - [License](#license)
+
+## Features
+
+This isn't a thin wrapper around Trello's REST API — it's a layer built specifically for driving boards from scripts and AI agents:
+
+- **Board-agnostic, multi-board by design.** Nothing is hardcoded to one board. Each project (or each AI agent) points at its own config file — switch boards with a flag, an env var, or just a different working directory. Run it against as many boards as you have, side by side, with zero code changes.
+- **Workflow-stage abstraction.** Map raw Trello list IDs to semantic stages (`todo`, `inProgress`, `done`, ...) once in config, then move cards by stage name everywhere — in the CLI, the SDK, and the MCP tools — instead of every caller needing to know or re-resolve list IDs.
+- **First-class MCP server**, not a bolted-on wrapper: every operation (list, move, comment, label, create, attach) is exposed as an agent tool over JSON-RPC 2.0 stdio, with no extra MCP SDK dependency. Point any MCP-compatible agent at it and it can run the board directly.
+- **Built for LLM consumption, not just human use.** `--brief` output strips timestamps/URLs/member IDs to cut token usage; JSON is the default format; errors come back as structured, parseable objects instead of thrown exceptions an agent has to guess at.
+- **Correctness-first caching.** Repeated reads within a short window are served from memory to cut down on redundant API calls (useful when an agent asks several related questions back to back) — but every write this tool makes invalidates the cache immediately, so you never get stale data back from your own actions.
+- Automatic Trello rate-limit handling (state persisted across invocations) and three interchangeable surfaces — CLI, SDK, MCP — backed by the same core, so behavior is consistent no matter which one you use.
 
 ## Quick Start
 
@@ -32,17 +49,6 @@ trello lists
 ```
 
 Prefer not to install globally? Run everything as `yarn start <command>` (or `node dist/cli.js <command>`) from inside the project folder instead — no `yarn link` needed.
-
-## Features
-
-This isn't a thin wrapper around Trello's REST API — it's a layer built specifically for driving boards from scripts and AI agents:
-
-- **Board-agnostic, multi-board by design.** Nothing is hardcoded to one board. Each project (or each AI agent) points at its own config file — switch boards with a flag, an env var, or just a different working directory. Run it against as many boards as you have, side by side, with zero code changes.
-- **Workflow-stage abstraction.** Map raw Trello list IDs to semantic stages (`todo`, `inProgress`, `done`, ...) once in config, then move cards by stage name everywhere — in the CLI, the SDK, and the MCP tools — instead of every caller needing to know or re-resolve list IDs.
-- **First-class MCP server**, not a bolted-on wrapper: every operation (list, move, comment, label, create, attach) is exposed as an agent tool over JSON-RPC 2.0 stdio, with no extra MCP SDK dependency. Point any MCP-compatible agent at it and it can run the board directly.
-- **Built for LLM consumption, not just human use.** `--brief` output strips timestamps/URLs/member IDs to cut token usage; JSON is the default format; errors come back as structured, parseable objects instead of thrown exceptions an agent has to guess at.
-- **Correctness-first caching.** Repeated reads within a short window are served from memory to cut down on redundant API calls (useful when an agent asks several related questions back to back) — but every write this tool makes invalidates the cache immediately, so you never get stale data back from your own actions.
-- Automatic Trello rate-limit handling (state persisted across invocations) and three interchangeable surfaces — CLI, SDK, MCP — backed by the same core, so behavior is consistent no matter which one you use.
 
 ## Getting Trello API Credentials
 
@@ -97,10 +103,6 @@ trello tasks list
 A `.env.example` is included as a template for the `.env` approach.
 
 ## CLI Usage
-
-![Example output of trello tasks list --brief, showing a JSON array of two sample cards with id, name, list, and labels fields](./docs/screenshot-tasks-list.png)
-
-*Example output shown above uses sample data, not a real board.*
 
 ### Lists
 
@@ -211,7 +213,21 @@ For Claude Code specifically, add that block to your MCP configuration (`.mcp.js
 
 All of these are gitignored by default. Never commit a real config file, token, or `.env` — if you fork or clone this repo, create your own config from scratch using the steps above.
 
-Trello's rate limits are handled automatically (state persisted to `.rate-limit.json`) — nothing to configure.
+## SDK Usage
+
+The SDK is usable directly in a Node/TypeScript app — the same operations as the CLI, without shelling out:
+
+```typescript
+import { createTrelloSdk } from 'trello-cli';
+
+const sdk = await createTrelloSdk('./myboard.config.board.json');
+
+const cards = await sdk.services.card.getAllCards();
+const context = await sdk.services.card.getFullContext('card-id');
+await sdk.services.card.moveCard('card-id', 'inProgress');
+await sdk.services.comment.addComment('card-id', 'My comment');
+const results = await sdk.services.attachment.downloadAttachments('card-id');
+```
 
 ## For Contributors
 
@@ -226,20 +242,6 @@ yarn start <command>     # Run built CLI
 yarn lint                # ESLint (yarn lint:fix to auto-fix)
 yarn format              # Prettier (yarn format:check to verify only)
 yarn typecheck           # Type check without emitting
-```
-
-The SDK is also usable directly in a Node/TypeScript app:
-
-```typescript
-import { createTrelloSdk } from 'trello-cli';
-
-const sdk = await createTrelloSdk('./myboard.config.board.json');
-
-const cards = await sdk.services.card.getAllCards();
-const context = await sdk.services.card.getFullContext('card-id');
-await sdk.services.card.moveCard('card-id', 'inProgress');
-await sdk.services.comment.addComment('card-id', 'My comment');
-const results = await sdk.services.attachment.downloadAttachments('card-id');
 ```
 
 ## License

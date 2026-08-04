@@ -10,6 +10,7 @@ import type {
 import type { TrelloClient } from '../core/client.js';
 import type { CacheManager } from '../core/cache.js';
 import { ListService } from './list.service.js';
+import { CACHE_TTL_MS } from '../constants/index.js';
 import { debug } from '../utils/logger.js';
 
 export interface GetContextOptions {
@@ -29,6 +30,11 @@ export class CardService {
   }
 
   async getAllCards(): Promise<TrelloCard[]> {
+    if (this.cache.isCardsCacheFresh(CACHE_TTL_MS)) {
+      debug('Using cached cards (fresh within TTL)');
+      return this.cache.getCards();
+    }
+
     const boardId = this.client.getConfig().boardId;
     debug('Fetching all cards for board:', boardId);
 
@@ -93,7 +99,9 @@ export class CardService {
       throw new Error(`Could not resolve list: ${listId}`);
     }
     debug('Creating card in list:', resolvedListId, 'name:', name);
-    return this.client.post<TrelloCard>('/cards', { name, desc, idList: resolvedListId });
+    const card = await this.client.post<TrelloCard>('/cards', { name, desc, idList: resolvedListId });
+    this.cache.invalidateCards();
+    return card;
   }
 
   async addAttachmentToCard(cardId: string, filePath: string, name?: string): Promise<TrelloAttachment> {
@@ -109,9 +117,11 @@ export class CardService {
       throw new Error(`Could not resolve list: ${listId}`);
     }
 
-    return this.client.put<TrelloCard>(`/cards/${cardId}`, {
+    const card = await this.client.put<TrelloCard>(`/cards/${cardId}`, {
       idList: resolvedListId,
     });
+    this.cache.invalidateCards();
+    return card;
   }
 
   private async getComments(cardId: string): Promise<TrelloComment[]> {

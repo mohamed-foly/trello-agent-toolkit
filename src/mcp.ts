@@ -3,7 +3,13 @@
 import 'dotenv/config';
 import { createTrelloSdk } from './index.js';
 import { formatBriefCards, formatBriefTaskContext } from './utils/formatter.js';
+import { setDebugEnabled, setLogFile, debug, error as logError } from './utils/logger.js';
 import type { TrelloCard } from './types/index.js';
+
+// MCP diagnostics are silent by default (stdout is reserved for JSON-RPC) — opt in with
+// MCP_DEBUG=true and/or MCP_LOG_FILE=<path>. Setting a log file implies you want it used.
+setDebugEnabled(process.env.MCP_DEBUG === 'true' || Boolean(process.env.MCP_LOG_FILE));
+setLogFile(process.env.MCP_LOG_FILE);
 
 // --- MCP JSON-RPC types ---
 
@@ -332,9 +338,6 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
     }
 
     case 'get_task': {
-      const lists = await sdk.services.list.getAllLists();
-      void lists; // ensure lists are cached for stage resolution
-
       const context = await sdk.services.card.getFullContext(args.id as string, {
         includeComments: args.comments !== false,
         includeAttachments: args.attachments !== false,
@@ -348,7 +351,6 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
     }
 
     case 'move_task': {
-      await sdk.services.list.getAllLists();
       const updatedCard = await sdk.services.card.moveCard(args.id as string, args.list as string);
       return updatedCard;
     }
@@ -356,25 +358,22 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
     case 'move_tasks': {
       const to = args.to as string;
       const lists = await sdk.services.list.getAllLists();
+      const availableLists = lists.map((l) => l.name);
 
-      const destList = lists.find(
-        (l) => l.name.toLowerCase() === to.toLowerCase() || l.id === to
-      );
-      if (!destList) {
-        return { error: true, message: `Destination list not found: ${to}`, availableLists: lists.map((l) => l.name) };
+      const destListId = await sdk.services.list.getListIdByNameOrId(to);
+      if (!destListId) {
+        return { error: true, message: `Destination list not found: ${to}`, availableLists };
       }
 
       let cardsToMove: TrelloCard[];
 
       if (args.from) {
-        const sourceList = lists.find(
-          (l) => l.name.toLowerCase() === (args.from as string).toLowerCase() || l.id === args.from
-        );
-        if (!sourceList) {
-          return { error: true, message: `Source list not found: ${args.from}`, availableLists: lists.map((l) => l.name) };
+        const sourceListId = await sdk.services.list.getListIdByNameOrId(args.from as string);
+        if (!sourceListId) {
+          return { error: true, message: `Source list not found: ${args.from}`, availableLists };
         }
         const allCards = await sdk.services.card.getAllCards();
-        cardsToMove = allCards.filter((card) => card.idList === sourceList.id);
+        cardsToMove = allCards.filter((card) => card.idList === sourceListId);
       } else if (Array.isArray(args.cardIds) && args.cardIds.length > 0) {
         const allCards = await sdk.services.card.getAllCards();
         cardsToMove = allCards.filter((card) => (args.cardIds as string[]).includes(card.id));
@@ -386,7 +385,7 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
 
       for (const card of cardsToMove) {
         try {
-          await sdk.services.card.moveCard(card.id, destList.id);
+          await sdk.services.card.moveCard(card.id, destListId);
           result.moved++;
           result.cards.push({ id: card.id, name: card.name, success: true });
         } catch (err) {
@@ -398,7 +397,6 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
     }
 
     case 'create_task': {
-      await sdk.services.list.getAllLists();
       const card = await sdk.services.card.createCard(
         args.list as string,
         args.name as string,
@@ -422,7 +420,6 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
         return { error: true, message: 'tasks must be a non-empty array' };
       }
 
-      await sdk.services.list.getAllLists();
       const result = {
         created: 0,
         failed: 0,
@@ -488,6 +485,7 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
       }
 
       const card = await sdk.client.put<TrelloCard>(`/cards/${args.id as string}`, update);
+      sdk.cache.invalidateCards();
       return {
         id: card.id,
         name: card.name,
@@ -513,6 +511,7 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
         undefined,
         { name: args.name as string, pos },
       );
+      sdk.cache.invalidateLists();
       return {
         id: createdList.id,
         name: createdList.name,
@@ -534,6 +533,8 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
         `/labels/${args.id as string}`,
         update,
       );
+      // Cards embed full label objects (name/color), so any cached card is now stale.
+      sdk.cache.invalidateCards();
       return { id: label.id, name: label.name, color: label.color };
     }
 
@@ -587,7 +588,7 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
 
 function sendResponse(response: JsonRpcResponse | JsonRpcNotification): void {
   const json = JSON.stringify(response);
-  log(`sending response: ${json.substring(0, 200)}`);
+  debug(`sending response: ${json.substring(0, 200)}`);
   process.stdout.write(json + '\n');
 }
 
@@ -605,7 +606,7 @@ async function handleRequest(request: JsonRpcRequest): Promise<void> {
   switch (method) {
     case 'initialize': {
       const clientProtocol = (params?.protocolVersion as string) || '2024-11-05';
-      log(`client protocol version: ${clientProtocol}`);
+      debug(`client protocol version: ${clientProtocol}`);
       sendResponse(makeResult(id, {
         protocolVersion: clientProtocol,
         capabilities: {
@@ -678,34 +679,20 @@ async function handleRequest(request: JsonRpcRequest): Promise<void> {
   }
 }
 
-// --- Logging ---
-
-import { appendFileSync } from 'fs';
-
-const LOG_FILE = process.env.MCP_LOG_FILE || '';
-
-function log(msg: string): void {
-  const line = `[${new Date().toISOString()}] ${msg}\n`;
-  process.stderr.write(line);
-  if (LOG_FILE) {
-    try { appendFileSync(LOG_FILE, line); } catch { /* ignore */ }
-  }
-}
-
 // --- Stdin parser for Content-Length framed messages ---
 
 function startServer(): void {
-  log('trello-mcp server starting');
-  log(`BOARD_CONFIG=${process.env.BOARD_CONFIG || '(not set)'}`);
-  log(`cwd=${process.cwd()}`);
-  log(`node=${process.version}`);
+  debug('trello-mcp server starting');
+  debug(`BOARD_CONFIG=${process.env.BOARD_CONFIG || '(not set)'}`);
+  debug(`cwd=${process.cwd()}`);
+  debug(`node=${process.version}`);
 
   let buffer = '';
 
   process.stdin.setEncoding('utf8');
 
   process.stdin.on('data', (chunk: string) => {
-    log(`stdin data received: ${chunk.length} bytes`);
+    debug(`stdin data received: ${chunk.length} bytes`);
     buffer += chunk;
 
     while (true) {
@@ -743,46 +730,45 @@ function startServer(): void {
   });
 
   function processMessage(body: string): void {
-    log(`processing: ${body.substring(0, 200)}`);
+    debug(`processing: ${body.substring(0, 200)}`);
     try {
       const request = JSON.parse(body) as JsonRpcRequest;
-      log(`handling method: ${request.method} (id=${request.id})`);
+      debug(`handling method: ${request.method} (id=${request.id})`);
       handleRequest(request).catch((err) => {
-        log(`handleRequest error: ${err}`);
+        logError(`handleRequest error: ${err}`);
         if (request.id !== undefined) {
           sendResponse(makeError(request.id, -32603, err instanceof Error ? err.message : String(err)));
         }
       });
     } catch (e) {
-      log(`JSON parse error: ${e}`);
+      logError(`JSON parse error: ${e}`);
       sendResponse(makeError(null, -32700, 'Parse error'));
     }
   }
 
   process.stdin.on('end', () => {
-    log('stdin ended, exiting');
+    debug('stdin ended, exiting');
     process.exit(0);
   });
 
   process.stdin.on('error', (err) => {
-    log(`stdin error: ${err}`);
+    logError(`stdin error: ${err}`);
   });
 
   process.stdout.on('error', (err) => {
-    log(`stdout error: ${err}`);
+    logError(`stdout error: ${err}`);
   });
 
   // Prevent unhandled rejections from crashing the server
   process.on('unhandledRejection', (err) => {
-    log(`unhandled rejection: ${err}`);
-    process.stderr.write(`[trello-mcp] Unhandled rejection: ${err}\n`);
+    logError(`unhandled rejection: ${err}`);
   });
 
   process.on('uncaughtException', (err) => {
-    log(`uncaught exception: ${err.stack || err}`);
+    logError(`uncaught exception: ${err.stack || err}`);
   });
 
-  log('trello-mcp server ready, waiting for input on stdin');
+  debug('trello-mcp server ready, waiting for input on stdin');
 }
 
 startServer();

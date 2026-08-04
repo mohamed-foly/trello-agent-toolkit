@@ -1,6 +1,7 @@
 import type { TrelloList, BoardConfig } from '../types/index.js';
 import type { TrelloClient } from '../core/client.js';
 import type { CacheManager } from '../core/cache.js';
+import { CACHE_TTL_MS } from '../constants/index.js';
 import { debug } from '../utils/logger.js';
 
 export class ListService {
@@ -34,7 +35,10 @@ export class ListService {
       return stageListId;
     }
 
-    const lists = await this.cache.getLists();
+    // Goes through getAllLists() (not cache.getLists() directly) so this always resolves
+    // against a fresh-enough snapshot instead of depending on some earlier caller having
+    // warmed the cache first.
+    const lists = await this.getAllLists();
 
     const exactMatch = lists.find((l) => l.id === nameOrId);
     if (exactMatch) {
@@ -51,6 +55,11 @@ export class ListService {
   }
 
   async getAllLists(): Promise<TrelloList[]> {
+    if (this.cache.isListsCacheFresh(CACHE_TTL_MS)) {
+      debug('Using cached lists (fresh within TTL)');
+      return this.cache.getLists();
+    }
+
     const boardId = this.config.boardId;
     debug('Fetching all lists for board:', boardId);
 

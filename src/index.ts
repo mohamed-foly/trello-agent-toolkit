@@ -100,7 +100,7 @@ export async function createTrelloSdk(configPath?: string) {
       comment: new CommentServiceClass(client),
       attachment: new AttachmentServiceClass(client, cache, config),
       checklist: new ChecklistServiceClass(client),
-      label: new LabelServiceClass(client),
+      label: new LabelServiceClass(client, cache),
     },
   };
 }

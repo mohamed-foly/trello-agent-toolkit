@@ -1,9 +1,13 @@
 import type { TrelloLabel } from '../types/index.js';
 import type { TrelloClient } from '../core/client.js';
+import type { CacheManager } from '../core/cache.js';
 import { debug } from '../utils/logger.js';
 
 export class LabelService {
-  constructor(private client: TrelloClient) {}
+  constructor(
+    private client: TrelloClient,
+    private cache: CacheManager
+  ) {}
 
   async getBoardLabels(): Promise<TrelloLabel[]> {
     const boardId = this.client.getConfig().boardId;
@@ -16,11 +20,14 @@ export class LabelService {
     await this.client.post<void>(`/cards/${cardId}/idLabels`, undefined, {
       value: labelId,
     });
+    // Cards embed full label objects, so a label change makes any cached card stale.
+    this.cache.invalidateCards();
   }
 
   async removeLabelFromCard(cardId: string, labelId: string): Promise<void> {
     debug('Removing label:', labelId, 'from card:', cardId);
     await this.client.delete<void>(`/cards/${cardId}/idLabels/${labelId}`);
+    this.cache.invalidateCards();
   }
 
   async getLabelByName(name: string): Promise<TrelloLabel | null> {

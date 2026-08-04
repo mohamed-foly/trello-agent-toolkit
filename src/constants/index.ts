@@ -9,9 +9,16 @@ export const RATE_LIMITS = {
   TOKEN_INTERVAL_MS: 10000,
   KEY_MAX: 300,
   KEY_INTERVAL_MS: 10000,
-  MEMBER_ENDPOINT_MAX: 100,
-  MEMBER_ENDPOINT_INTERVAL_MS: 900000,
 } as const;
+
+/**
+ * How long a fetched lists/cards snapshot is served from memory before refetching.
+ * Bounds staleness from edits made outside this process (e.g. a teammate moving a
+ * card in the Trello UI) while still deduping the bursts of repeated reads a single
+ * MCP conversation tends to produce. Any write this process makes itself invalidates
+ * the relevant cache immediately, regardless of this TTL — see CacheManager.
+ */
+export const CACHE_TTL_MS = 5000;
 
 export const HTTP_STATUS = {
   OK: 200,

@@ -25,7 +25,7 @@ export class TrelloClient {
     await this.rateLimiter.waitIfNeeded();
 
     const url = this.buildUrl(endpoint, options.query);
-    debug(`${options.method || 'GET'} ${url}`);
+    debug(`${options.method || 'GET'} ${this.redactCredentials(url)}`);
 
     const fetchOptions: RequestInit = {
       method: options.method || 'GET',
@@ -127,7 +127,7 @@ export class TrelloClient {
     formData.append('file', blob, fileName);
     formData.append('name', fileName);
 
-    debug(`Uploading file to: ${url}`);
+    debug(`Uploading file to: ${this.redactCredentials(url)}`);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -140,6 +140,13 @@ export class TrelloClient {
     }
 
     return (await response.json()) as T;
+  }
+
+  private redactCredentials(url: string): string {
+    const redacted = new URL(url);
+    if (redacted.searchParams.has('key')) redacted.searchParams.set('key', '***');
+    if (redacted.searchParams.has('token')) redacted.searchParams.set('token', '***');
+    return redacted.toString();
   }
 
   private buildUrl(endpoint: string, query?: Record<string, string | number | boolean | undefined>): string {

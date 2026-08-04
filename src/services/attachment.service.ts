@@ -1,4 +1,4 @@
-import { resolve, join } from 'path';
+import { resolve, join, basename } from 'path';
 import { writeFile } from 'fs/promises';
 import type { TrelloAttachment, DownloadResult, BoardConfig } from '../types/index.js';
 import type { TrelloClient } from '../core/client.js';
@@ -42,8 +42,9 @@ export class AttachmentService {
 
     for (const attachment of attachments) {
       try {
-        const filePath = join(cardDir, attachment.fileName || attachment.name);
-        const relativePath = join(baseDir, cardId, attachment.fileName || attachment.name);
+        const safeName = basename(attachment.fileName || attachment.name);
+        const filePath = join(cardDir, safeName);
+        const relativePath = join(baseDir, cardId, safeName);
 
         if (attachment.isUpload && attachment.url) {
           const buffer = await this.client.downloadFile(attachment.url);

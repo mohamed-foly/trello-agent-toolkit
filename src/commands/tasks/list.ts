@@ -1,13 +1,7 @@
 import { Command } from 'commander';
 import type { TaskListOptions, TrelloCard } from '../../types/index.js';
-import { loadConfig } from '../../core/config.js';
-import { TrelloClient } from '../../core/client.js';
-import { CacheManager } from '../../core/cache.js';
-import { CardService } from '../../services/card.service.js';
-import { ListService } from '../../services/list.service.js';
-import { format, formatBriefCards } from '../../utils/formatter.js';
-import { handleError } from '../../utils/error.js';
-import { setDebugEnabled } from '../../utils/logger.js';
+import { createCommandContext, withErrorHandling } from '../context.js';
+import { formatBriefCards } from '../../utils/formatter.js';
 
 interface ExtendedTaskListOptions extends TaskListOptions {
   list?: string;
@@ -24,62 +18,40 @@ export function registerListCommand(parent: Command): void {
     .option('--list-id <id>', 'Filter by list ID')
     .option('--brief', 'Output concise format (id, name, list, labels only)')
     .option('--limit <number>', 'Limit number of results', parseInt)
-    .action(async (options: ExtendedTaskListOptions) => {
-      try {
-        const globalOptions = parent.parent?.opts() || {};
-        if (globalOptions.debug) {
-          setDebugEnabled(true);
-        }
+    .action(
+      withErrorHandling(async (options: ExtendedTaskListOptions, cmd: Command) => {
+        const { sdk, print } = await createCommandContext(cmd);
 
-        const config = await loadConfig(globalOptions);
-        const client = new TrelloClient(config);
-        const cache = new CacheManager(config);
-        const cardService = new CardService(client, cache);
-        const listService = new ListService(client, cache);
-
-        const lists = await listService.getAllLists();
+        const lists = await sdk.services.list.getAllLists();
 
         let cards: TrelloCard[];
 
         if (options.listId) {
-          // Filter by list ID directly
-          const allCards = await cardService.getAllCards();
+          const allCards = await sdk.services.card.getAllCards();
           cards = allCards.filter((card) => card.idList === options.listId);
         } else if (options.list) {
-          // Filter by list name
-          const targetList = lists.find(
-            (l) => l.name.toLowerCase() === options.list!.toLowerCase()
-          );
+          const targetList = lists.find((l) => l.name.toLowerCase() === options.list!.toLowerCase());
           if (!targetList) {
-            console.log(format({
+            print({
               error: true,
               message: `List not found: ${options.list}`,
               availableLists: lists.map((l) => l.name),
-            }, globalOptions.format || 'json'));
+            });
             process.exit(1);
           }
-          const allCards = await cardService.getAllCards();
+          const allCards = await sdk.services.card.getAllCards();
           cards = allCards.filter((card) => card.idList === targetList.id);
         } else if (options.stage) {
-          cards = await cardService.getCardsByStage(options.stage);
+          cards = await sdk.services.card.getCardsByStage(options.stage);
         } else {
-          cards = await cardService.getAllCards();
+          cards = await sdk.services.card.getAllCards();
         }
 
         if (options.limit && options.limit > 0) {
           cards = cards.slice(0, options.limit);
         }
 
-        const outputFormat = globalOptions.format || 'json';
-
-        if (options.brief) {
-          const briefCards = formatBriefCards(cards, lists);
-          console.log(format(briefCards, outputFormat));
-        } else {
-          console.log(format(cards, outputFormat));
-        }
-      } catch (error) {
-        handleError(error);
-      }
-    });
+        print(options.brief ? formatBriefCards(cards, lists) : cards);
+      })
+    );
 }

@@ -98,6 +98,10 @@ A `.env.example` is included as a template for the `.env` approach.
 
 ## CLI Usage
 
+![Example output of trello tasks list --brief, showing a JSON array of two sample cards with id, name, list, and labels fields](./docs/screenshot-tasks-list.png)
+
+*Example output shown above uses sample data, not a real board.*
+
 ### Lists
 
 ```bash

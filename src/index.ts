@@ -11,6 +11,7 @@ import { CardService as CardServiceClass, type GetContextOptions } from './servi
 import { CommentService as CommentServiceClass } from './services/comment.service.js';
 import { AttachmentService as AttachmentServiceClass } from './services/attachment.service.js';
 import { ChecklistService as ChecklistServiceClass } from './services/checklist.service.js';
+import { LabelService as LabelServiceClass } from './services/label.service.js';
 
 // Re-export Core
 export { TrelloClientClass as TrelloClient, type RequestOptions };
@@ -25,6 +26,7 @@ export { CardServiceClass as CardService, type GetContextOptions };
 export { CommentServiceClass as CommentService };
 export { AttachmentServiceClass as AttachmentService };
 export { ChecklistServiceClass as ChecklistService };
+export { LabelServiceClass as LabelService };
 
 // Types
 export type {
@@ -98,6 +100,7 @@ export async function createTrelloSdk(configPath?: string) {
       comment: new CommentServiceClass(client),
       attachment: new AttachmentServiceClass(client, cache, config),
       checklist: new ChecklistServiceClass(client),
+      label: new LabelServiceClass(client),
     },
   };
 }

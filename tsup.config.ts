@@ -4,6 +4,7 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     cli: 'src/cli.ts',
+    mcp: 'src/mcp.ts',
   },
   format: ['cjs', 'esm'],
   dts: true,
@@ -28,6 +29,15 @@ export default defineConfig({
       const content = fs.readFileSync(cliMjsPath, 'utf-8');
       if (!content.startsWith('#!/usr/bin/env node')) {
         fs.writeFileSync(cliMjsPath, '#!/usr/bin/env node\n' + content);
+      }
+    }
+    // Add shebang to MCP server files
+    for (const mcpPath of ['./dist/mcp.js', './dist/mcp.mjs']) {
+      if (fs.existsSync(mcpPath)) {
+        const content = fs.readFileSync(mcpPath, 'utf-8');
+        if (!content.startsWith('#!/usr/bin/env node')) {
+          fs.writeFileSync(mcpPath, '#!/usr/bin/env node\n' + content);
+        }
       }
     }
   },

@@ -87,6 +87,20 @@ export class CardService {
     return context;
   }
 
+  async createCard(listId: string, name: string, desc?: string): Promise<TrelloCard> {
+    const resolvedListId = await this.listService.getListIdByNameOrId(listId);
+    if (!resolvedListId) {
+      throw new Error(`Could not resolve list: ${listId}`);
+    }
+    debug('Creating card in list:', resolvedListId, 'name:', name);
+    return this.client.post<TrelloCard>('/cards', { name, desc, idList: resolvedListId });
+  }
+
+  async addAttachmentToCard(cardId: string, filePath: string, name?: string): Promise<TrelloAttachment> {
+    debug('Uploading attachment to card:', cardId, 'file:', filePath);
+    return this.client.uploadFile<TrelloAttachment>(`/cards/${cardId}/attachments`, filePath, name);
+  }
+
   async moveCard(cardId: string, listId: string): Promise<TrelloCard> {
     debug('Moving card:', cardId, 'to list:', listId);
 

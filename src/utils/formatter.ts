@@ -196,3 +196,42 @@ function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str;
   return str.slice(0, maxLength - 3) + '...';
 }
+
+// Brief format types
+export interface BriefCard {
+  id: string;
+  name: string;
+  list: string;
+  labels: string[];
+}
+
+export interface BriefTaskContext {
+  id: string;
+  name: string;
+  description: string;
+  list: string;
+  labels: string[];
+  comments: string[];
+}
+
+export function formatBriefCards(cards: TrelloCard[], lists: TrelloList[]): BriefCard[] {
+  const listMap = new Map(lists.map((l) => [l.id, l.name]));
+
+  return cards.map((card) => ({
+    id: card.id,
+    name: card.name,
+    list: listMap.get(card.idList) || 'Unknown',
+    labels: card.labels.map((l) => l.name || l.color),
+  }));
+}
+
+export function formatBriefTaskContext(context: TaskContext): BriefTaskContext {
+  return {
+    id: context.card.id,
+    name: context.card.name,
+    description: context.card.desc,
+    list: context.list.name,
+    labels: context.card.labels.map((l) => l.name || l.color),
+    comments: context.comments.map((c) => c.text),
+  };
+}

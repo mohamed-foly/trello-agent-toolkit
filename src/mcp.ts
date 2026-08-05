@@ -688,6 +688,9 @@ function startServer(): void {
   debug(`node=${process.version}`);
 
   let buffer = '';
+  // Tracks in-flight tools/call work so stdin closing doesn't exit the process
+  // while a request is still awaiting a Trello API response.
+  const pendingRequests = new Set<Promise<void>>();
 
   process.stdin.setEncoding('utf8');
 
@@ -734,12 +737,15 @@ function startServer(): void {
     try {
       const request = JSON.parse(body) as JsonRpcRequest;
       debug(`handling method: ${request.method} (id=${request.id})`);
-      handleRequest(request).catch((err) => {
-        logError(`handleRequest error: ${err}`);
-        if (request.id !== undefined) {
-          sendResponse(makeError(request.id, -32603, err instanceof Error ? err.message : String(err)));
-        }
-      });
+      const pending: Promise<void> = handleRequest(request)
+        .catch((err) => {
+          logError(`handleRequest error: ${err}`);
+          if (request.id !== undefined) {
+            sendResponse(makeError(request.id, -32603, err instanceof Error ? err.message : String(err)));
+          }
+        })
+        .finally(() => pendingRequests.delete(pending));
+      pendingRequests.add(pending);
     } catch (e) {
       logError(`JSON parse error: ${e}`);
       sendResponse(makeError(null, -32700, 'Parse error'));
@@ -747,8 +753,11 @@ function startServer(): void {
   }
 
   process.stdin.on('end', () => {
-    debug('stdin ended, exiting');
-    process.exit(0);
+    debug(`stdin ended, waiting for ${pendingRequests.size} in-flight request(s) before exiting`);
+    Promise.allSettled([...pendingRequests]).then(() => {
+      debug('all in-flight requests settled, exiting');
+      process.exit(0);
+    });
   });
 
   process.stdin.on('error', (err) => {
